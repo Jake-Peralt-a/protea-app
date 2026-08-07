@@ -1,26 +1,138 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f6f9;
+  --surface: #ffffff;
+  --foreground: #16202b;
+  --muted: #5b6b7b;
+  --border: #dde3ea;
+  --primary: #1f4e79;
+  --primary-fg: #ffffff;
+  --primary-hover: #17416a;
+  --success: #1b7a4b;
+  --success-bg: #e7f4ec;
+  --warning: #9a6700;
+  --warning-bg: #fbf3e0;
+  --danger: #b3261e;
+  --danger-bg: #fbe9e8;
+  --info-bg: #e8eef5;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0e1620;
+    --surface: #16212e;
+    --foreground: #e8edf2;
+    --muted: #9aa8b6;
+    --border: #26333f;
+    --primary: #4f8fc7;
+    --primary-fg: #0b1119;
+    --primary-hover: #6ea3d3;
+    --success: #4ec98a;
+    --success-bg: #122a1e;
+    --warning: #e0b458;
+    --warning-bg: #2c2411;
+    --danger: #ef8a83;
+    --danger-bg: #2b1615;
+    --info-bg: #172533;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px rgb(16 32 43 / 0.04);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    font-size: 0.925rem;
+    padding: 0.6rem 1.1rem;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      opacity 0.15s ease;
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: var(--primary-fg);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--foreground);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--background);
+  }
+  .btn-danger {
+    background: var(--danger);
+    color: #fff;
+  }
+  .field-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: var(--foreground);
+  }
+  .field-input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.95rem;
+    color: var(--foreground);
+  }
+  .field-input:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  }
+  .field-error {
+    color: var(--danger);
+    font-size: 0.82rem;
+    margin-top: 0.3rem;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+  }
 }

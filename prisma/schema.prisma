@@ -1,0 +1,171 @@
+// Future Protea App — Registration Identity Verification & Admin Approval (CR-REG-001)
+// Data model per BRD sections 7 (functional), 8 (workflow states), 9 (business rules).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  REGISTRANT
+  ADMIN
+}
+
+enum RegistrationType {
+  ADULT
+  CHILD
+}
+
+// BRD §8 workflow states. Access is granted only in APPROVED.
+enum RegistrationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  GOVERNMENT_ID
+  BIRTH_CERTIFICATE
+}
+
+// Basis on which a potential duplicate was matched (FR-16 / FR-17).
+enum MatchBasis {
+  ADULT_ID
+  CHILD_CERT_GUARDIAN
+}
+
+enum Decision {
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(REGISTRANT)
+  createdAt    DateTime @default(now())
+
+  // A user holds at most one registration record (resubmission updates it in place;
+  // decision history is preserved in ApprovalDecision / AuditLog). Business rule §9.
+  registration  Registration?
+  decisions     ApprovalDecision[] @relation("AdminDecisions")
+  notifications Notification[]
+  auditLogs     AuditLog[]         @relation("ActorAudit")
+}
+
+model Registration {
+  id     String             @id @default(cuid())
+  userId String             @unique
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   RegistrationType
+  status RegistrationStatus @default(DRAFT)
+
+  // Common identity fields.
+  fullName    String
+  dateOfBirth DateTime
+
+  // Adult path (FR-05). Nullable because it does not apply to the child path.
+  governmentIdNumber String?
+
+  // Child path (FR-08..11). Guardian name + birth-certificate number form the
+  // identity basis for a child registrant.
+  parentGuardianName String?
+  birthCertNumber    String?
+
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  documents      Document[]
+  decisions      ApprovalDecision[]
+  // Flags where THIS registration is the newly-submitted subject.
+  duplicateFlags DuplicateFlag[]    @relation("FlagSubject")
+  // Flags where THIS registration is the pre-existing matched record.
+  matchedByFlags DuplicateFlag[]    @relation("FlagMatched")
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+
+  // Fast lookup for duplicate detection (FR-15..17).
+  @@index([governmentIdNumber])
+  @@index([birthCertNumber, parentGuardianName])
+  @@index([status])
+}
+
+model Document {
+  id               String       @id @default(cuid())
+  registrationId   String
+  registration     Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  type             DocumentType
+  // Opaque key into the storage backend (local FS or S3). Never web-public (FR-13).
+  storageKey       String       @unique
+  originalFilename String
+  mimeType         String
+  fileSizeBytes    Int
+  uploadedAt       DateTime     @default(now())
+
+  @@index([registrationId])
+}
+
+model DuplicateFlag {
+  id                   String       @id @default(cuid())
+  registrationId       String
+  registration         Registration @relation("FlagSubject", fields: [registrationId], references: [id], onDelete: Cascade)
+  matchedRegistrationId String
+  matched              Registration @relation("FlagMatched", fields: [matchedRegistrationId], references: [id], onDelete: Cascade)
+  matchBasis           MatchBasis
+  // Generic, privacy-safe reason shown to the registrant (FR-18 / FR-31).
+  reason               String
+  createdAt            DateTime     @default(now())
+
+  @@index([registrationId])
+}
+
+// Immutable audit record of an administrator decision (FR-22 / FR-24).
+model ApprovalDecision {
+  id             String       @id @default(cuid())
+  registrationId String
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  adminId        String
+  admin          User         @relation("AdminDecisions", fields: [adminId], references: [id])
+  decision       Decision
+  reason         String
+  decidedAt      DateTime     @default(now())
+
+  @@index([registrationId])
+}
+
+// Append-only audit trail across the workflow (NFR — auditability).
+model AuditLog {
+  id             String        @id @default(cuid())
+  registrationId String?
+  registration   Registration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  actorId        String?
+  actor          User?         @relation("ActorAudit", fields: [actorId], references: [id], onDelete: SetNull)
+  action         String
+  metadata       Json?
+  at             DateTime      @default(now())
+
+  @@index([registrationId])
+  @@index([at])
+}
+
+// In-app + emitted notifications to keep the registrant informed (FR-29 / FR-30).
+model Notification {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  registrationId String?
+  registration   Registration? @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  type           String
+  message        String
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([userId])
+}
