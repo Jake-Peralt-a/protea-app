@@ -51,7 +51,10 @@ export async function createSession(userId: string, role: Role): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Keyed off the deployed scheme, not NODE_ENV: a production build served over
+    // plain HTTP (e.g. an IP-only demo host) must not set Secure, or the browser
+    // silently discards the cookie and no one can sign in.
+    secure: config.appUrl.startsWith("https://"),
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE_SECONDS,
