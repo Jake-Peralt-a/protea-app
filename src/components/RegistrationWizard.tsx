@@ -112,7 +112,8 @@ export function RegistrationWizard() {
 
       {step === "dob" && (
         <section className="mt-6">
-          <h2 className="text-lg font-semibold">Step 1 · Your date of birth</h2>
+          <p className="mono-label">Step 1 of 3</p>
+          <h2 className="mt-1 text-lg font-bold">Your date of birth</h2>
           <p className="mt-1 mb-5 text-sm" style={{ color: "var(--muted)" }}>
             We use your date of birth to determine which identity documents are
             required.
@@ -129,15 +130,17 @@ export function RegistrationWizard() {
             onChange={(e) => setDateOfBirth(e.target.value)}
           />
           {category && (
-            <p
-              className="mt-3 rounded-md px-3 py-2 text-sm"
-              style={{ background: "var(--info-bg)", color: "var(--primary)" }}
-            >
-              Based on this date ({age} years), you will register via the{" "}
+            <p className="notice notice-info mt-3">
+              Based on this date (<span className="mono-value">{age}</span> years), you
+              will register via the{" "}
               <strong>{category === "ADULT" ? "adult" : "child"}</strong> path.
             </p>
           )}
-          {error && <p className="field-error">{error}</p>}
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
           <div className="mt-6 flex justify-end">
             <button type="button" className="btn btn-primary" onClick={goFromDob}>
               Continue
@@ -148,8 +151,9 @@ export function RegistrationWizard() {
 
       {step === "details" && category && (
         <section className="mt-6">
-          <h2 className="text-lg font-semibold">
-            Step 2 · {category === "ADULT" ? "Adult" : "Child"} identity details
+          <p className="mono-label">Step 2 of 3</p>
+          <h2 className="mt-1 text-lg font-bold">
+            {category === "ADULT" ? "Adult" : "Child"} identity details
           </h2>
           <p className="mt-1 mb-5 text-sm" style={{ color: "var(--muted)" }}>
             {category === "ADULT"
@@ -157,7 +161,7 @@ export function RegistrationWizard() {
               : "Provide the child's details, the parent/guardian name, and upload the birth certificate."}
           </p>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <div>
               <label className="field-label" htmlFor="fullName">
                 {category === "ADULT" ? "Full name" : "Child's full name"}
@@ -215,9 +219,9 @@ export function RegistrationWizard() {
               <label className="field-label" htmlFor="document">
                 {category === "ADULT"
                   ? "Upload government-issued ID"
-                  : "Upload birth certificate"}{" "}
-                (PNG, JPG, WEBP, or PDF)
+                  : "Upload birth certificate"}
               </label>
+              <p className="mono-label mb-1">PNG, JPG, WEBP, or PDF</p>
               <input
                 id="document"
                 type="file"
@@ -226,14 +230,18 @@ export function RegistrationWizard() {
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
               {file && (
-                <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
+                <p className="mono-value mt-1 text-xs" style={{ color: "var(--muted)" }}>
                   Selected: {file.name} ({Math.ceil(file.size / 1024)} KB)
                 </p>
               )}
             </div>
           </div>
 
-          {error && <p className="field-error">{error}</p>}
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
           <div className="mt-6 flex justify-between">
             <button type="button" className="btn btn-secondary" onClick={() => setStep("dob")}>
               Back
@@ -247,27 +255,35 @@ export function RegistrationWizard() {
 
       {step === "review" && category && (
         <section className="mt-6">
-          <h2 className="text-lg font-semibold">Step 3 · Review &amp; submit</h2>
+          <p className="mono-label">Step 3 of 3</p>
+          <h2 className="mt-1 text-lg font-bold">Review &amp; submit</h2>
           <p className="mt-1 mb-5 text-sm" style={{ color: "var(--muted)" }}>
             Confirm your details. After submitting, an administrator must approve your
             registration before you can access the application.
           </p>
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <dl
+            className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-lg p-4 sm:grid-cols-2"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+          >
             <Row label="Registration type" value={category === "ADULT" ? "Adult" : "Child"} />
             <Row label={category === "ADULT" ? "Full name" : "Child's name"} value={fullName} />
-            <Row label="Date of birth" value={dateOfBirth} />
+            <Row label="Date of birth" value={dateOfBirth} mono />
             {category === "ADULT" ? (
-              <Row label="Government ID number" value={governmentIdNumber} />
+              <Row label="Government ID number" value={governmentIdNumber} mono />
             ) : (
               <>
                 <Row label="Parent/guardian" value={parentGuardianName} />
-                <Row label="Birth-certificate number" value={birthCertNumber} />
+                <Row label="Birth-certificate number" value={birthCertNumber} mono />
               </>
             )}
-            <Row label="Document" value={file?.name ?? "—"} />
+            <Row label="Document" value={file?.name ?? "—"} mono />
           </dl>
 
-          {error && <p className="field-error mt-4">{error}</p>}
+          {error && (
+            <p className="field-error mt-4" role="alert">
+              {error}
+            </p>
+          )}
           <div className="mt-6 flex justify-between">
             <button
               type="button"
@@ -292,13 +308,23 @@ export function RegistrationWizard() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+// `mono` marks values that read as record data — numbers, dates, filenames —
+// which are set in the scoreboard face. Names and categories stay in the body face.
+function Row({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <div>
-      <dt className="text-xs font-medium" style={{ color: "var(--muted)" }}>
-        {label}
-      </dt>
-      <dd className="text-sm font-medium">{value || "—"}</dd>
+      <dt className="mono-label">{label}</dt>
+      <dd className={`text-sm font-medium${mono ? " mono-value" : ""}`}>
+        {value || "—"}
+      </dd>
     </div>
   );
 }
@@ -311,28 +337,41 @@ function Stepper({ step }: { step: Step }) {
   ];
   const activeIndex = steps.findIndex((s) => s.id === step);
   return (
-    <ol className="flex items-center gap-2 text-xs font-medium">
+    <ol className="flex items-center gap-1.5 sm:gap-2" aria-label="Registration steps">
       {steps.map((s, i) => {
         const done = i < activeIndex;
         const active = i === activeIndex;
+        const filled = active || done;
         return (
-          <li key={s.id} className="flex items-center gap-2">
+          <li key={s.id} className="flex flex-1 items-center gap-1.5 sm:flex-none sm:gap-2">
             <span
-              className="inline-flex h-6 w-6 items-center justify-center rounded-full"
+              className="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full"
               style={{
-                background: active || done ? "var(--primary)" : "var(--info-bg)",
-                color: active || done ? "var(--primary-fg)" : "var(--muted)",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
+                background: filled ? "var(--primary)" : "var(--surface-2)",
+                color: filled ? "var(--primary-fg)" : "var(--muted)",
               }}
+              aria-hidden
             >
               {i + 1}
             </span>
-            <span style={{ color: active ? "var(--foreground)" : "var(--muted)" }}>
+            <span
+              className="hidden text-xs sm:inline"
+              style={{ color: active ? "var(--foreground)" : "var(--muted)" }}
+            >
               {s.label}
             </span>
+            <span className="sr-only">
+              {s.label}
+              {active ? " (current step)" : done ? " (completed)" : ""}
+            </span>
             {i < steps.length - 1 && (
-              <span aria-hidden style={{ color: "var(--border)" }}>
-                ›
-              </span>
+              <span
+                aria-hidden
+                className="h-px flex-1 sm:w-6 sm:flex-none"
+                style={{ background: done ? "var(--primary)" : "var(--border)" }}
+              />
             )}
           </li>
         );

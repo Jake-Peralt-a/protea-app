@@ -20,7 +20,7 @@ export function CredentialsForm({
   const [state, formAction, pending] = useActionState(action, undefined);
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form action={formAction} className="flex flex-col gap-5">
       <div>
         <label className="field-label" htmlFor="email">
           Email
@@ -55,7 +55,7 @@ export function CredentialsForm({
           {state.error}
         </p>
       )}
-      <button type="submit" className="btn btn-primary" disabled={pending}>
+      <button type="submit" className="btn btn-primary w-full" disabled={pending}>
         {pending ? pendingLabel : submitLabel}
       </button>
     </form>

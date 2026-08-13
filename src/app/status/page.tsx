@@ -42,7 +42,10 @@ export default async function StatusPage() {
       <SiteHeader email={user.email} role={user.role} />
       <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-10">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">Registration status</h1>
+          <div>
+            <p className="mono-label mb-1">Registration</p>
+            <h1 className="display text-2xl">Registration status</h1>
+          </div>
           <StatusBadge status={status} />
         </div>
 
@@ -53,73 +56,74 @@ export default async function StatusPage() {
 
           {/* Progress timeline (BRD §8), unless rejected. */}
           {status !== "REJECTED" && (
-            <ol className="mt-6 flex items-center gap-3">
-              {TIMELINE.map((s, i) => {
-                const reached = currentIndex >= i;
-                return (
-                  <li key={s} className="flex flex-1 flex-col items-center gap-2">
+            <div className="rail mt-6" aria-label="Registration progress">
+              <div className="rail-track">
+                {TIMELINE.map((s, i) => {
+                  const reached = currentIndex >= i;
+                  const isCurrent = currentIndex === i;
+                  return (
                     <span
-                      className="h-3 w-3 rounded-full"
-                      style={{ background: reached ? "var(--primary)" : "var(--border)" }}
+                      key={s}
+                      className="rail-seg"
+                      data-on={reached}
+                      data-current={isCurrent}
                     />
-                    <span
-                      className="text-center text-xs"
-                      style={{ color: reached ? "var(--foreground)" : "var(--muted)" }}
-                    >
+                  );
+                })}
+              </div>
+              <div className="rail-labels">
+                {TIMELINE.map((s, i) => {
+                  const reached = currentIndex >= i;
+                  return (
+                    <span key={s} className="rail-label" data-on={reached}>
                       {STATUS_META[s].label}
                     </span>
-                  </li>
-                );
-              })}
-            </ol>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* Potential-duplicate notice — generic reason only (FR-18/31). */}
           {registration.duplicateFlags.length > 0 && status !== "REJECTED" && (
-            <div
-              className="mt-6 rounded-md px-4 py-3 text-sm"
-              style={{ background: "var(--warning-bg)", color: "var(--warning)" }}
-            >
+            <div className="notice notice-warning mt-6">
               {registration.duplicateFlags[0].reason}
             </div>
           )}
 
           {/* Rejection reason (FR-28). */}
           {status === "REJECTED" && (
-            <div
-              className="mt-6 rounded-md px-4 py-3 text-sm"
-              style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
-            >
+            <div className="notice notice-danger mt-6">
               {latestDecision?.reason
                 ? `Reason: ${latestDecision.reason}`
                 : "Your registration was not approved."}
             </div>
           )}
 
-          <div className="mt-6 flex gap-3">
-            {status === "APPROVED" && (
-              <Link href="/app" className="btn btn-primary">
-                Go to the application
-              </Link>
-            )}
-            {status === "REJECTED" && (
-              <Link href="/register" className="btn btn-primary">
-                Correct and resubmit
-              </Link>
-            )}
-          </div>
+          {(status === "APPROVED" || status === "REJECTED") && (
+            <div className="mt-6 flex gap-3">
+              {status === "APPROVED" && (
+                <Link href="/app" className="btn btn-primary">
+                  Go to the application
+                </Link>
+              )}
+              {status === "REJECTED" && (
+                <Link href="/register" className="btn btn-primary">
+                  Correct and resubmit
+                </Link>
+              )}
+            </div>
+          )}
         </div>
 
         {notifications.length > 0 && (
           <section className="mt-8">
-            <h2 className="mb-3 text-sm font-semibold" style={{ color: "var(--muted)" }}>
-              Notifications
-            </h2>
+            <h2 className="mono-label mb-3">Notifications</h2>
             <ul className="flex flex-col gap-2">
               {notifications.map((n) => (
                 <li key={n.id} className="card px-4 py-3 text-sm">
                   <div>{n.message}</div>
-                  <div className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
+                  <div className="mono-value mt-1 text-xs" style={{ color: "var(--muted)" }}>
                     {n.createdAt.toLocaleString()}
                   </div>
                 </li>
