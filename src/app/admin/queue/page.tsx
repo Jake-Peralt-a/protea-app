@@ -4,9 +4,32 @@ import { prisma } from "@/lib/db";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { RegistrationStatus } from "@/lib/status";
+import { PENDING_REVIEW_STATUSES, MAX_SUBMISSION_ATTEMPTS } from "@/lib/transitions";
+import { needsAdultReverification } from "@/lib/age";
 
-// Administrator review queue (FR-20). Pending registrations first (oldest first),
-// with an optional view of already-decided registrations.
+// Administrator review queue (FR-20). Three views: registrations waiting on an
+// administrator, registrations waiting on the registrant (INFO_REQUIRED, added by
+// CR-REG-002), and closed registrations.
+const VIEWS = {
+  pending: {
+    label: "Pending",
+    statuses: [...PENDING_REVIEW_STATUSES] as RegistrationStatus[],
+    empty: "No registrations waiting on review. New submissions will appear here.",
+  },
+  waiting: {
+    label: "Awaiting registrant",
+    statuses: ["INFO_REQUIRED"] as RegistrationStatus[],
+    empty: "No registrations are waiting on more information from a registrant.",
+  },
+  decided: {
+    label: "Decided",
+    statuses: ["APPROVED", "REJECTED", "REVOKED"] as RegistrationStatus[],
+    empty: "No decisions recorded yet. Approvals and rejections will show up here.",
+  },
+} as const;
+
+type ViewKey = keyof typeof VIEWS;
+
 export default async function QueuePage({
   searchParams,
 }: {
@@ -14,22 +37,21 @@ export default async function QueuePage({
 }) {
   const admin = await requireAdmin();
   const { view } = await searchParams;
-  const showDecided = view === "decided";
-
-  const pendingStatuses: RegistrationStatus[] = ["SUBMITTED", "UNDER_REVIEW"];
-  const decidedStatuses: RegistrationStatus[] = ["APPROVED", "REJECTED"];
+  const activeView: ViewKey = view === "decided" || view === "waiting" ? view : "pending";
+  const current = VIEWS[activeView];
 
   const registrations = await prisma.registration.findMany({
-    where: { status: { in: showDecided ? decidedStatuses : pendingStatuses } },
-    orderBy: showDecided ? { updatedAt: "desc" } : { submittedAt: "asc" },
+    where: { status: { in: [...current.statuses] } },
+    orderBy: activeView === "pending" ? { submittedAt: "asc" } : { updatedAt: "desc" },
     include: {
       user: { select: { email: true } },
-      _count: { select: { duplicateFlags: true } },
+      // Only flags raised against the current attempt matter for triage.
+      _count: { select: { duplicateFlags: { where: { supersededAt: null } } } },
     },
   });
 
   const pendingCount = await prisma.registration.count({
-    where: { status: { in: pendingStatuses } },
+    where: { status: { in: [...VIEWS.pending.statuses] } },
   });
 
   return (
@@ -48,38 +70,30 @@ export default async function QueuePage({
           className="mt-4 inline-flex gap-1 rounded-lg p-1 text-sm"
           style={{ border: "1px solid var(--border)", background: "var(--surface-2)" }}
         >
-          <Link
-            href="/admin/queue"
-            className="rounded-md px-3 py-1.5"
-            style={{
-              background: showDecided ? "transparent" : "var(--surface)",
-              color: showDecided ? "var(--muted)" : "var(--foreground)",
-              fontWeight: showDecided ? 400 : 600,
-              boxShadow: showDecided ? "none" : "var(--shadow-card)",
-            }}
-          >
-            Pending
-          </Link>
-          <Link
-            href="/admin/queue?view=decided"
-            className="rounded-md px-3 py-1.5"
-            style={{
-              background: showDecided ? "var(--surface)" : "transparent",
-              color: showDecided ? "var(--foreground)" : "var(--muted)",
-              fontWeight: showDecided ? 600 : 400,
-              boxShadow: showDecided ? "var(--shadow-card)" : "none",
-            }}
-          >
-            Decided
-          </Link>
+          {(Object.keys(VIEWS) as ViewKey[]).map((key) => {
+            const on = key === activeView;
+            return (
+              <Link
+                key={key}
+                href={key === "pending" ? "/admin/queue" : `/admin/queue?view=${key}`}
+                className="rounded-md px-3 py-1.5"
+                style={{
+                  background: on ? "var(--surface)" : "transparent",
+                  color: on ? "var(--foreground)" : "var(--muted)",
+                  fontWeight: on ? 600 : 400,
+                  boxShadow: on ? "var(--shadow-card)" : "none",
+                }}
+              >
+                {VIEWS[key].label}
+              </Link>
+            );
+          })}
         </div>
 
         <div className="card mt-5 overflow-hidden">
           {registrations.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm" style={{ color: "var(--muted)" }}>
-              {showDecided
-                ? "No decisions recorded yet. Approvals and rejections will show up here."
-                : "No registrations waiting on review. New submissions will appear here."}
+              {current.empty}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -107,7 +121,7 @@ export default async function QueuePage({
                         {r.submittedAt ? r.submittedAt.toLocaleDateString() : "—"}
                       </td>
                       <td>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge status={r.status as RegistrationStatus} />
                           {r._count.duplicateFlags > 0 && (
                             <span
@@ -115,6 +129,19 @@ export default async function QueuePage({
                               style={{ background: "var(--warning-bg)", color: "var(--warning)" }}
                             >
                               Possible duplicate
+                            </span>
+                          )}
+                          {needsAdultReverification(r) && (
+                            <span
+                              className="badge"
+                              style={{ background: "var(--warning-bg)", color: "var(--warning)" }}
+                            >
+                              Now 18+
+                            </span>
+                          )}
+                          {r.attemptNumber > 1 && (
+                            <span className="badge">
+                              Attempt {r.attemptNumber}/{MAX_SUBMISSION_ATTEMPTS}
                             </span>
                           )}
                         </div>

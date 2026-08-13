@@ -4,14 +4,20 @@ import { prisma } from "./db";
 import { recordAudit } from "./audit";
 import { notifyRegistrant } from "./notify";
 import { findDuplicate, type MatchableRegistration } from "./duplicate-check";
+import {
+  canTransition,
+  DUPLICATE_MATCHING_STATUSES,
+  MAX_SUBMISSION_ATTEMPTS,
+  type RegistrationStatus,
+} from "./transitions";
 import type { RegistrationInput } from "./validation";
 
-// Server-side domain logic for the registration workflow (BRD §7). Kept separate
-// from the thin server actions so the transactional rules live in one place.
+// Server-side domain logic for the registration workflow (BRD §7, extended by
+// CR-REG-002). Kept separate from the thin server actions so the transactional rules
+// live in one place. Every state change goes through the transition table in
+// ./transitions — this module never decides for itself what is legal.
 
 export class RegistrationConflictError extends Error {}
-
-const PENDING_OR_APPROVED = ["SUBMITTED", "UNDER_REVIEW", "APPROVED"] as const;
 
 export interface SubmissionDocument {
   storageKey: string;
@@ -22,15 +28,42 @@ export interface SubmissionDocument {
 
 export interface SubmissionResult {
   registrationId: string;
+  attemptNumber: number;
+  /**
+   * Whether a potential duplicate was flagged for administrator attention. This is
+   * for internal use and testing — it is deliberately NOT surfaced to the registrant,
+   * because confirming a match discloses that the matched record exists (FR-18 as
+   * amended by CR-REG-002, FR-31).
+   */
   duplicate: boolean;
-  // Generic, privacy-safe reason (FR-18/31) — safe to show the registrant.
-  duplicateReason?: string;
 }
 
+/** Human-readable refusal for an illegal transition, surfaced in the UI. */
+function requireTransition(
+  from: RegistrationStatus,
+  to: RegistrationStatus,
+  message: string,
+): void {
+  if (!canTransition(from, to)) {
+    throw new RegistrationConflictError(message);
+  }
+}
+
+const RESUBMIT_REFUSALS: Partial<Record<RegistrationStatus, string>> = {
+  SUBMITTED: "Your registration has already been submitted and is awaiting review.",
+  UNDER_REVIEW: "Your registration is currently being reviewed.",
+  APPROVED: "You already have an approved registration.",
+  REVOKED:
+    "Your registration was revoked and cannot be resubmitted. Please contact an administrator.",
+};
+
 /**
- * Create or (for a previously rejected registration) replace a registrant's
- * submission, run duplicate detection, and move it into administrator review.
- * FR-04, FR-12..19, §8.
+ * Create or replace a registrant's submission, run duplicate detection, and move it
+ * into administrator review. FR-04, FR-12..19, FR-39..43, §8.
+ *
+ * Resubmission (from REJECTED or INFO_REQUIRED) updates the registration in place but
+ * never destroys history: prior documents and duplicate flags are marked superseded
+ * rather than deleted, so the evidence behind an earlier decision survives (gap W-02).
  */
 export async function submitRegistration(params: {
   user: { id: string; email: string };
@@ -46,15 +79,26 @@ export async function submitRegistration(params: {
       where: { userId: user.id },
     });
 
-    if (
-      existing &&
-      (PENDING_OR_APPROVED as readonly string[]).includes(existing.status)
-    ) {
-      throw new RegistrationConflictError(
-        "You already have a registration in progress or approved.",
+    const attemptNumber = existing ? existing.attemptNumber + 1 : 1;
+
+    if (existing) {
+      const from = existing.status as RegistrationStatus;
+      requireTransition(
+        from,
+        "SUBMITTED",
+        RESUBMIT_REFUSALS[from] ?? "This registration cannot be resubmitted.",
       );
+      // Attempt cap (FR-42). The registrant has already used MAX attempts; only an
+      // administrator can permit another.
+      if (existing.attemptNumber >= MAX_SUBMISSION_ATTEMPTS) {
+        throw new RegistrationConflictError(
+          `You have reached the maximum of ${MAX_SUBMISSION_ATTEMPTS} submission ` +
+            "attempts. Please contact an administrator.",
+        );
+      }
     }
 
+    const now = new Date();
     const data: Prisma.RegistrationUncheckedCreateInput = {
       userId: user.id,
       type: input.type,
@@ -66,21 +110,27 @@ export async function submitRegistration(params: {
       parentGuardianName:
         input.type === "CHILD" ? input.parentGuardianName : null,
       birthCertNumber: input.type === "CHILD" ? input.birthCertNumber : null,
-      submittedAt: new Date(),
+      attemptNumber,
+      submittedAt: now,
     };
 
-    // Reset a previously rejected registration in place (resubmission).
     const registration = existing
       ? await tx.registration.update({
           where: { id: existing.id },
-          data: { ...data, status: "SUBMITTED", submittedAt: new Date() },
+          data: { ...data, status: "SUBMITTED", submittedAt: now, attemptNumber },
         })
       : await tx.registration.create({ data });
 
     if (existing) {
-      await tx.document.deleteMany({ where: { registrationId: registration.id } });
-      await tx.duplicateFlag.deleteMany({
-        where: { registrationId: registration.id },
+      // Retain, do not delete (FR-40, gap W-02). Superseded rows stay queryable so an
+      // administrator can see what an earlier decision was actually taken against.
+      await tx.document.updateMany({
+        where: { registrationId: registration.id, supersededAt: null },
+        data: { supersededAt: now },
+      });
+      await tx.duplicateFlag.updateMany({
+        where: { registrationId: registration.id, supersededAt: null },
+        data: { supersededAt: now },
       });
     }
 
@@ -92,22 +142,33 @@ export async function submitRegistration(params: {
         originalFilename: document.originalFilename,
         mimeType: document.mimeType,
         fileSizeBytes: document.fileSizeBytes,
+        attemptNumber,
       },
     });
 
-    // Duplicate detection against other registrants of the same category (FR-15..17).
+    // Duplicate detection (FR-15..17, FR-32). Candidates are drawn from every age
+    // category so the cross-category name+DOB basis can fire, and only from states
+    // that participate in matching — a REJECTED record must not block a later
+    // registration on the same ID (gap D-05).
     const candidate: MatchableRegistration = {
       id: registration.id,
       type: registration.type,
+      fullName: registration.fullName,
+      dateOfBirth: registration.dateOfBirth,
       governmentIdNumber: registration.governmentIdNumber,
       birthCertNumber: registration.birthCertNumber,
       parentGuardianName: registration.parentGuardianName,
     };
     const others = await tx.registration.findMany({
-      where: { type: registration.type, id: { not: registration.id } },
+      where: {
+        id: { not: registration.id },
+        status: { in: [...DUPLICATE_MATCHING_STATUSES] },
+      },
       select: {
         id: true,
         type: true,
+        fullName: true,
+        dateOfBirth: true,
         governmentIdNumber: true,
         birthCertNumber: true,
         parentGuardianName: true,
@@ -121,7 +182,8 @@ export async function submitRegistration(params: {
           registrationId: registration.id,
           matchedRegistrationId: match.matchedRegistrationId,
           matchBasis: match.basis,
-          reason: match.reason,
+          reason: match.adminReason,
+          attemptNumber,
         },
       });
       await recordAudit(
@@ -129,13 +191,14 @@ export async function submitRegistration(params: {
           action: "DUPLICATE_FLAGGED",
           registrationId: registration.id,
           actorId: user.id,
-          metadata: { basis: match.basis },
+          metadata: { basis: match.basis, attemptNumber },
         },
         tx,
       );
     }
 
     // Every registration goes to administrator review — including non-duplicates (§9).
+    requireTransition("SUBMITTED", "UNDER_REVIEW", "Unexpected registration state.");
     await tx.registration.update({
       where: { id: registration.id },
       data: { status: "UNDER_REVIEW" },
@@ -146,11 +209,17 @@ export async function submitRegistration(params: {
         action: "REGISTRATION_SUBMITTED",
         registrationId: registration.id,
         actorId: user.id,
-        metadata: { type: registration.type, resubmission: Boolean(existing) },
+        metadata: {
+          type: registration.type,
+          attemptNumber,
+          resubmission: Boolean(existing),
+        },
       },
       tx,
     );
 
+    // The message is identical whether or not a duplicate was flagged — telling the
+    // registrant otherwise would confirm the existence of the matched record (C-02).
     await notifyRegistrant(
       {
         userId: user.id,
@@ -158,18 +227,102 @@ export async function submitRegistration(params: {
         registrationId: registration.id,
         type: "SUBMITTED",
         subject: "Your Future Protea registration was received",
-        message: match
-          ? `Your registration has been received and is under administrator review. ${match.reason}`
-          : "Your registration has been received and is now under administrator review. You will be notified once a decision is made.",
+        message:
+          "Your registration has been received and is now under administrator " +
+          "review. You will be notified once a decision is made.",
       },
       tx,
     );
 
     return {
       registrationId: registration.id,
+      attemptNumber,
       duplicate: Boolean(match),
-      duplicateReason: match?.reason,
     };
+  });
+}
+
+// --- Administrator outcomes --------------------------------------------------
+// Approve, reject, request-more-information and revoke all follow the same shape:
+// check the transition, move the state, write an ApprovalDecision, write an audit
+// entry, notify the registrant. They share one implementation so the audit trail can
+// never diverge between outcomes (FR-24).
+
+type OutcomeDecision = "APPROVED" | "REJECTED" | "INFO_REQUESTED" | "REVOKED";
+
+interface OutcomeSpec {
+  toStatus: RegistrationStatus;
+  decision: OutcomeDecision;
+  auditAction: string;
+  notificationType: string;
+  subject: string;
+  /** Built from the administrator's reason; must never reference another registrant. */
+  message: (reason: string) => string;
+  /** Refusal shown when the registration is not in a state this outcome applies to. */
+  refusal: string;
+}
+
+async function applyOutcome(
+  params: {
+    registrationId: string;
+    admin: { id: string };
+    reason: string;
+  },
+  spec: OutcomeSpec,
+): Promise<void> {
+  const { registrationId, admin, reason } = params;
+
+  await prisma.$transaction(async (tx) => {
+    const registration = await tx.registration.findUnique({
+      where: { id: registrationId },
+      include: { user: true },
+    });
+    if (!registration) {
+      throw new Error("Registration not found");
+    }
+
+    requireTransition(
+      registration.status as RegistrationStatus,
+      spec.toStatus,
+      spec.refusal,
+    );
+
+    await tx.registration.update({
+      where: { id: registrationId },
+      data: { status: spec.toStatus },
+    });
+
+    await tx.approvalDecision.create({
+      data: {
+        registrationId,
+        adminId: admin.id,
+        decision: spec.decision,
+        reason,
+        attemptNumber: registration.attemptNumber,
+      },
+    });
+
+    await recordAudit(
+      {
+        action: spec.auditAction,
+        registrationId,
+        actorId: admin.id,
+        metadata: { attemptNumber: registration.attemptNumber },
+      },
+      tx,
+    );
+
+    await notifyRegistrant(
+      {
+        userId: registration.userId,
+        email: registration.user.email,
+        registrationId,
+        type: spec.notificationType,
+        subject: spec.subject,
+        message: spec.message(reason),
+      },
+      tx,
+    );
   });
 }
 
@@ -180,64 +333,84 @@ export async function decideRegistration(params: {
   decision: "APPROVED" | "REJECTED";
   reason: string;
 }): Promise<void> {
-  const { registrationId, admin, decision, reason } = params;
+  const { decision, ...rest } = params;
+  await applyOutcome(
+    rest,
+    decision === "APPROVED"
+      ? {
+          toStatus: "APPROVED",
+          decision: "APPROVED",
+          auditAction: "REGISTRATION_APPROVED",
+          notificationType: "APPROVED",
+          subject: "Your Future Protea registration was approved",
+          message: () =>
+            "Good news — your registration has been approved. You now have access " +
+            "to the application.",
+          refusal: "This registration has already been decided.",
+        }
+      : {
+          toStatus: "REJECTED",
+          decision: "REJECTED",
+          auditAction: "REGISTRATION_REJECTED",
+          notificationType: "REJECTED",
+          subject: "Your Future Protea registration was not approved",
+          message: (reason) =>
+            `Your registration was not approved. Reason: ${reason}`,
+          refusal: "This registration has already been decided.",
+        },
+  );
+}
 
-  await prisma.$transaction(async (tx) => {
-    const registration = await tx.registration.findUnique({
-      where: { id: registrationId },
-      include: { user: true },
-    });
-    if (!registration) {
-      throw new Error("Registration not found");
-    }
-    if (
-      registration.status !== "UNDER_REVIEW" &&
-      registration.status !== "SUBMITTED"
-    ) {
-      throw new RegistrationConflictError(
-        "This registration has already been decided.",
-      );
-    }
+/**
+ * Return a registration to the registrant for more information (BRD v1.1 FR-36,
+ * gap W-04). This is the middle ground between approve and reject: it does not write
+ * an adverse outcome, and the registrant can amend and resubmit.
+ */
+export async function requestMoreInfo(params: {
+  registrationId: string;
+  admin: { id: string };
+  note: string;
+}): Promise<void> {
+  await applyOutcome(
+    {
+      registrationId: params.registrationId,
+      admin: params.admin,
+      reason: params.note,
+    },
+    {
+      toStatus: "INFO_REQUIRED",
+      decision: "INFO_REQUESTED",
+      auditAction: "REGISTRATION_INFO_REQUESTED",
+      notificationType: "INFO_REQUIRED",
+      subject: "More information is needed for your Future Protea registration",
+      message: (note) =>
+        "An administrator needs more information before your registration can be " +
+        `decided. ${note} You can update your registration and submit it again.`,
+      refusal: "This registration is not awaiting review.",
+    },
+  );
+}
 
-    await tx.registration.update({
-      where: { id: registrationId },
-      data: { status: decision },
-    });
-
-    await tx.approvalDecision.create({
-      data: {
-        registrationId,
-        adminId: admin.id,
-        decision,
-        reason,
-      },
-    });
-
-    await recordAudit(
-      {
-        action: decision === "APPROVED" ? "REGISTRATION_APPROVED" : "REGISTRATION_REJECTED",
-        registrationId,
-        actorId: admin.id,
-      },
-      tx,
-    );
-
-    await notifyRegistrant(
-      {
-        userId: registration.userId,
-        email: registration.user.email,
-        registrationId,
-        type: decision,
-        subject:
-          decision === "APPROVED"
-            ? "Your Future Protea registration was approved"
-            : "Your Future Protea registration was not approved",
-        message:
-          decision === "APPROVED"
-            ? "Good news — your registration has been approved. You now have access to the application."
-            : `Your registration was not approved. Reason: ${reason}`,
-      },
-      tx,
-    );
+/**
+ * Withdraw a previously granted approval (BRD v1.1 FR-44, gap W-03). Access is lost
+ * on the registrant's next request, because the approval gate reads the current
+ * status from the database on every protected route (see requireApprovedRegistrant).
+ * REVOKED is terminal: there is no reinstatement path in this release.
+ */
+export async function revokeRegistration(params: {
+  registrationId: string;
+  admin: { id: string };
+  reason: string;
+}): Promise<void> {
+  await applyOutcome(params, {
+    toStatus: "REVOKED",
+    decision: "REVOKED",
+    auditAction: "REGISTRATION_REVOKED",
+    notificationType: "REVOKED",
+    subject: "Your Future Protea registration has been revoked",
+    message: (reason) =>
+      "Your registration has been revoked and your access to the application has " +
+      `been withdrawn. Reason: ${reason}`,
+    refusal: "Only an approved registration can be revoked.",
   });
 }

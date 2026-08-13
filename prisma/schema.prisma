@@ -20,12 +20,15 @@ enum RegistrationType {
 }
 
 // BRD §8 workflow states. Access is granted only in APPROVED.
+// INFO_REQUIRED and REVOKED added by CR-REG-002 (gaps W-03, W-04).
 enum RegistrationStatus {
   DRAFT
   SUBMITTED
   UNDER_REVIEW
+  INFO_REQUIRED
   APPROVED
   REJECTED
+  REVOKED
 }
 
 enum DocumentType {
@@ -34,14 +37,20 @@ enum DocumentType {
 }
 
 // Basis on which a potential duplicate was matched (FR-16 / FR-17).
+// NAME_DOB is the cross-category secondary basis added by CR-REG-002 (gap W-06).
 enum MatchBasis {
   ADULT_ID
   CHILD_CERT_GUARDIAN
+  NAME_DOB
 }
 
+// An administrator outcome. INFO_REQUESTED and REVOKED are recorded through the same
+// ApprovalDecision model as approve/reject so they inherit the audit trail (FR-24).
 enum Decision {
   APPROVED
   REJECTED
+  INFO_REQUESTED
+  REVOKED
 }
 
 model User {
@@ -78,6 +87,10 @@ model Registration {
   parentGuardianName String?
   birthCertNumber    String?
 
+  // Which submission attempt this record is currently on (CR-REG-002, gap W-02).
+  // Incremented on every resubmission; capped at MAX_SUBMISSION_ATTEMPTS.
+  attemptNumber Int @default(1)
+
   submittedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -108,6 +121,10 @@ model Document {
   mimeType         String
   fileSizeBytes    Int
   uploadedAt       DateTime     @default(now())
+  // Set when a later attempt replaces this document. The row is never deleted, so the
+  // evidence behind an earlier decision survives resubmission (CR-REG-002, gap W-02).
+  supersededAt     DateTime?
+  attemptNumber    Int          @default(1)
 
   @@index([registrationId])
 }
@@ -119,9 +136,13 @@ model DuplicateFlag {
   matchedRegistrationId String
   matched              Registration @relation("FlagMatched", fields: [matchedRegistrationId], references: [id], onDelete: Cascade)
   matchBasis           MatchBasis
-  // Generic, privacy-safe reason shown to the registrant (FR-18 / FR-31).
+  // Generic, privacy-safe reason (FR-18 / FR-31 as amended by CR-REG-002, gap C-02).
+  // Visible to administrators only — the registrant is never told a match exists.
   reason               String
   createdAt            DateTime     @default(now())
+  // Retained rather than deleted across resubmissions (CR-REG-002, gap W-02).
+  supersededAt         DateTime?
+  attemptNumber        Int          @default(1)
 
   @@index([registrationId])
 }
@@ -135,6 +156,8 @@ model ApprovalDecision {
   admin          User         @relation("AdminDecisions", fields: [adminId], references: [id])
   decision       Decision
   reason         String
+  // Which submission attempt the decision was taken against (CR-REG-002, gap W-02).
+  attemptNumber  Int          @default(1)
   decidedAt      DateTime     @default(now())
 
   @@index([registrationId])

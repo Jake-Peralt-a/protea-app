@@ -100,9 +100,9 @@ async function main() {
       registrationId: second.id,
       matchedRegistrationId: first.id,
       matchBasis: "ADULT_ID",
-      reason:
-        "A registration with the same government-issued ID number already exists. " +
-        "Your registration has been sent to an administrator to review this potential duplicate.",
+      // Administrator-facing since CR-REG-002 (gap C-02) — the registrant is never
+      // told that a match exists.
+      reason: "Matched an existing registration on government-issued ID number.",
     },
   });
 
