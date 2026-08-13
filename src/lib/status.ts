@@ -1,10 +1,9 @@
 // Presentation + access mapping for the BRD §8 workflow states.
-export type RegistrationStatus =
-  | "DRAFT"
-  | "SUBMITTED"
-  | "UNDER_REVIEW"
-  | "APPROVED"
-  | "REJECTED";
+// The states themselves and the transition rules live in ./transitions — this module
+// only decides how each one is shown and whether it grants access.
+import type { RegistrationStatus } from "./transitions";
+
+export type { RegistrationStatus };
 
 interface StatusMeta {
   label: string;
@@ -32,6 +31,13 @@ export const STATUS_META: Record<RegistrationStatus, StatusMeta> = {
     accessGranted: false,
     tone: "warning",
   },
+  INFO_REQUIRED: {
+    label: "Information required",
+    description:
+      "An administrator needs more information before your registration can be decided.",
+    accessGranted: false,
+    tone: "warning",
+  },
   APPROVED: {
     label: "Approved",
     description: "Your registration has been approved. You have access.",
@@ -41,6 +47,14 @@ export const STATUS_META: Record<RegistrationStatus, StatusMeta> = {
   REJECTED: {
     label: "Rejected",
     description: "Your registration was not approved.",
+    accessGranted: false,
+    tone: "danger",
+  },
+  REVOKED: {
+    label: "Revoked",
+    description:
+      "Your registration was approved and has since been withdrawn by an administrator. " +
+      "You no longer have access to the application.",
     accessGranted: false,
     tone: "danger",
   },

@@ -16,13 +16,35 @@ type Category = "ADULT" | "CHILD";
 
 const ACCEPT = ".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf";
 
-export function RegistrationWizard() {
-  const [step, setStep] = useState<Step>("dob");
-  const [dateOfBirth, setDateOfBirth] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [governmentIdNumber, setGovernmentIdNumber] = useState("");
-  const [parentGuardianName, setParentGuardianName] = useState("");
-  const [birthCertNumber, setBirthCertNumber] = useState("");
+/** Previously submitted values, used to prefill an amendment (FR-36/FR-39). */
+export interface RegistrationInitialValues {
+  fullName: string;
+  dateOfBirth: string;
+  governmentIdNumber: string;
+  parentGuardianName: string;
+  birthCertNumber: string;
+}
+
+export function RegistrationWizard({
+  initial,
+}: {
+  initial?: RegistrationInitialValues;
+}) {
+  const isAmendment = Boolean(initial);
+  // An amendment opens on the details step — the date of birth is already known and
+  // valid, and "Back" is still available if it needs correcting.
+  const [step, setStep] = useState<Step>(initial ? "details" : "dob");
+  const [dateOfBirth, setDateOfBirth] = useState(initial?.dateOfBirth ?? "");
+  const [fullName, setFullName] = useState(initial?.fullName ?? "");
+  const [governmentIdNumber, setGovernmentIdNumber] = useState(
+    initial?.governmentIdNumber ?? "",
+  );
+  const [parentGuardianName, setParentGuardianName] = useState(
+    initial?.parentGuardianName ?? "",
+  );
+  const [birthCertNumber, setBirthCertNumber] = useState(
+    initial?.birthCertNumber ?? "",
+  );
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -222,6 +244,13 @@ export function RegistrationWizard() {
                   : "Upload birth certificate"}
               </label>
               <p className="mono-label mb-1">PNG, JPG, WEBP, or PDF</p>
+              {isAmendment && (
+                <p className="mb-2 text-xs" style={{ color: "var(--muted)" }}>
+                  Please upload the document again. Your earlier upload is kept on
+                  record for the administrator but is not carried over to this
+                  submission.
+                </p>
+              )}
               <input
                 id="document"
                 type="file"

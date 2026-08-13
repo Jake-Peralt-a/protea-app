@@ -6,21 +6,29 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { STATUS_META, type RegistrationStatus } from "@/lib/status";
 
+import { MAX_SUBMISSION_ATTEMPTS } from "@/lib/transitions";
+
 const TIMELINE: RegistrationStatus[] = [
   "SUBMITTED",
   "UNDER_REVIEW",
   "APPROVED",
 ];
 
+// States where the progress rail is meaningless — the registration has left the
+// happy path.
+const CLOSED_STATUSES: RegistrationStatus[] = ["REJECTED", "REVOKED"];
+
 export default async function StatusPage() {
   const user = await requireUser();
   if (user.role === "ADMIN") redirect("/admin/queue");
   if (!user.registration) redirect("/register");
 
+  // Duplicate flags are deliberately NOT loaded here: the registrant is never told
+  // that their details matched an existing record, because confirming a match
+  // discloses that record's existence (FR-18 as amended by CR-REG-002, FR-31).
   const registration = await prisma.registration.findUnique({
     where: { id: user.registration.id },
     include: {
-      duplicateFlags: true,
       decisions: { orderBy: { decidedAt: "desc" }, take: 1 },
     },
   });
@@ -35,7 +43,14 @@ export default async function StatusPage() {
     take: 10,
   });
 
-  const currentIndex = TIMELINE.indexOf(status);
+  // INFO_REQUIRED sits at the review stage of the rail — the registration is still in
+  // progress, it is just waiting on the registrant rather than the administrator.
+  const currentIndex =
+    status === "INFO_REQUIRED" ? TIMELINE.indexOf("UNDER_REVIEW") : TIMELINE.indexOf(status);
+  const isClosed = CLOSED_STATUSES.includes(status);
+  const attemptsRemaining = MAX_SUBMISSION_ATTEMPTS - registration.attemptNumber;
+  const canResubmit =
+    (status === "REJECTED" || status === "INFO_REQUIRED") && attemptsRemaining > 0;
 
   return (
     <>
@@ -54,8 +69,8 @@ export default async function StatusPage() {
             {meta.description}
           </p>
 
-          {/* Progress timeline (BRD §8), unless rejected. */}
-          {status !== "REJECTED" && (
+          {/* Progress timeline (BRD §8), unless the registration is closed. */}
+          {!isClosed && (
             <div className="rail mt-6" aria-label="Registration progress">
               <div className="rail-track">
                 {TIMELINE.map((s, i) => {
@@ -84,10 +99,14 @@ export default async function StatusPage() {
             </div>
           )}
 
-          {/* Potential-duplicate notice — generic reason only (FR-18/31). */}
-          {registration.duplicateFlags.length > 0 && status !== "REJECTED" && (
+          {/* What the administrator asked for (FR-36). This text is written by an
+              administrator and is required to be free of any other registrant's
+              details (FR-31). */}
+          {status === "INFO_REQUIRED" && (
             <div className="notice notice-warning mt-6">
-              {registration.duplicateFlags[0].reason}
+              {latestDecision?.reason
+                ? `An administrator asked for the following: ${latestDecision.reason}`
+                : "An administrator needs more information before your registration can be decided."}
             </div>
           )}
 
@@ -100,16 +119,44 @@ export default async function StatusPage() {
             </div>
           )}
 
-          {(status === "APPROVED" || status === "REJECTED") && (
+          {/* Revocation reason (FR-46). Terminal — no resubmission is offered. */}
+          {status === "REVOKED" && (
+            <div className="notice notice-danger mt-6">
+              {latestDecision?.reason
+                ? `Reason: ${latestDecision.reason}`
+                : "Your registration has been revoked."}{" "}
+              Please contact an administrator if you believe this is a mistake.
+            </div>
+          )}
+
+          {/* Attempt counter (FR-42) — shown only once an attempt has been used up. */}
+          {canResubmit && (
+            <p className="mt-4 text-sm" style={{ color: "var(--muted)" }}>
+              You have{" "}
+              <span className="mono-value">{attemptsRemaining}</span> of{" "}
+              <span className="mono-value">{MAX_SUBMISSION_ATTEMPTS}</span> submission
+              attempts remaining.
+            </p>
+          )}
+          {(status === "REJECTED" || status === "INFO_REQUIRED") && !canResubmit && (
+            <p className="mt-4 text-sm" style={{ color: "var(--muted)" }}>
+              You have used all {MAX_SUBMISSION_ATTEMPTS} submission attempts. Please
+              contact an administrator.
+            </p>
+          )}
+
+          {(status === "APPROVED" || canResubmit) && (
             <div className="mt-6 flex gap-3">
               {status === "APPROVED" && (
                 <Link href="/app" className="btn btn-primary">
                   Go to the application
                 </Link>
               )}
-              {status === "REJECTED" && (
+              {canResubmit && (
                 <Link href="/register" className="btn btn-primary">
-                  Correct and resubmit
+                  {status === "INFO_REQUIRED"
+                    ? "Update and resubmit"
+                    : "Correct and resubmit"}
                 </Link>
               )}
             </div>
