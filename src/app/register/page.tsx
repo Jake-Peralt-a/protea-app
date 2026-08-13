@@ -16,16 +16,14 @@ export default async function RegisterPage() {
     <>
       <SiteHeader email={user.email} role={user.role} />
       <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-10">
-        <h1 className="text-2xl font-bold tracking-tight">Identity registration</h1>
+        <span className="eyebrow">Registration</span>
+        <h1 className="display mt-3 text-3xl">Identity registration</h1>
         <p className="mt-2 mb-6 text-sm" style={{ color: "var(--muted)" }}>
           Complete the steps below. Your registration will be reviewed by an
           administrator before access is granted.
         </p>
         {status === "REJECTED" && (
-          <p
-            className="mb-6 rounded-md px-4 py-3 text-sm"
-            style={{ background: "var(--warning-bg)", color: "var(--warning)" }}
-          >
+          <p className="notice notice-warning mb-6">
             Your previous registration was not approved. You can correct your details
             and submit again below.
           </p>

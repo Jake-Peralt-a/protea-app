@@ -8,15 +8,20 @@ export default function LoginPage() {
     <>
       <SiteHeader />
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-12">
+        <span className="eyebrow mb-4 self-start">Sign in</span>
         <div className="card p-7">
-          <h1 className="text-xl font-semibold">Sign in</h1>
+          <h1 className="display text-2xl">Sign in</h1>
           <p className="mt-1 mb-6 text-sm" style={{ color: "var(--muted)" }}>
             Access your Future Protea registration.
           </p>
           <CredentialsForm action={login} submitLabel="Sign in" pendingLabel="Signing in…" />
           <p className="mt-6 text-sm" style={{ color: "var(--muted)" }}>
             New here?{" "}
-            <Link href="/signup" style={{ color: "var(--primary)", fontWeight: 600 }}>
+            <Link
+              href="/signup"
+              className="hover:underline"
+              style={{ color: "var(--primary)", fontWeight: 600 }}
+            >
               Create an account
             </Link>
           </p>

@@ -9,7 +9,7 @@ export default async function ApplicationPage() {
   return (
     <>
       <SiteHeader email={user.email} role={user.role} />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-16">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-20">
         <div className="card p-8">
           <span
             className="badge"
@@ -17,12 +17,15 @@ export default async function ApplicationPage() {
           >
             Approved
           </span>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">
+          <h1 className="display mt-5 text-2xl">
             Welcome to the Future Protea application
           </h1>
-          <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>
+          <p className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
             Your registration has been approved. This is where the scoring application
             would appear (out of scope for CR-REG-001).
+          </p>
+          <p className="mt-4 text-sm" style={{ color: "var(--muted)" }}>
+            You&apos;ll be notified here once the scoring application is ready to open.
           </p>
         </div>
       </main>
